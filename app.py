@@ -29,12 +29,17 @@ def putActivityData():
         data = request.get_json()  # Assuming the data is sent as JSON
         #
         for sample in data:
-            print("I got a query", sample)
-            df = pd.DataFrame(sample['data'])
-            df['label'] = sample['label']
+            gyro_df = pd.DataFrame(sample['gyroscope_data'])
+            gyro_df['label'] = sample['label']
 
-            timestamp = sample['data'][0]['timestamp']
-            df.to_csv(os.path.join(DATA_FOLDER, str(timestamp) + '.csv'), index=False)
+            timestamp = sample['gyroscope_data'][0]['timestamp'] if len(sample['gyroscope_data']) > 0 else 0
+            gyro_df.to_csv(os.path.join(DATA_FOLDER, 'gyro_' + str(timestamp) + '.csv'), index=False)
+
+            motion_df = pd.DataFrame(sample['motion_data']) 
+            motion_df['label'] = sample['label']
+
+            timestamp = sample['motion_data'][0]['timestamp'] if len(sample['motion_data']) > 0 else 1
+            motion_df.to_csv(os.path.join(DATA_FOLDER, 'motion_' + str(timestamp) + '.csv'), index=False)
         # Process the data as needed
         response = jsonify({
             'data': "Done!"#
