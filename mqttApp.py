@@ -1,11 +1,14 @@
 import paho.mqtt.client as mqtt
 import ssl
 import threading, queue
-from influxdb import InfluxDBClient
 from influxdb_client.client.write_api import SYNCHRONOUS
+from influxdb_client import InfluxDBClient, Point
+
+import json
+import keyboard
 
 #Global variables
-working = False
+working = False #stop_flag = threading.Event()
 data_queue = queue.Queue()
 
 #Setting up
@@ -20,8 +23,7 @@ INFLUXDB_HOST = {
 
 # Function to save data to InfluxDB
 def influxdb_writer():
-    client = InfluxDBClient(host=INFLUXDB_HOST['address'], 
-                            port=INFLUXDB_HOST['port'], 
+    client = InfluxDBClient(url=f'http://{INFLUXDB_HOST["address"]}:{INFLUXDB_HOST["port"]}', 
                             token=INFLUXDB_HOST['token'],
                             org=INFLUXDB_HOST['org'])
     write_api = client.write_api(write_options=SYNCHRONOUS)
@@ -29,7 +31,25 @@ def influxdb_writer():
     global working
     while (working or not data_queue.empty()):
         data = data_queue.get()
-        #write_api.write(INFLUXDB_BUCKET, INFLUXDB_ORG, point)
+
+        fields = {}
+        for metric in data['payload']['metrics']:
+            fields[metric['metric']] = float(metric['value'])
+
+        # Define the data point
+        point = [
+            {
+                "measurement": data['payload']['name'],
+                "tags": {
+                    "clientid": data['clientid'],
+                    "label": data['payload']['label']
+                },
+                "time": data['payload']['time'],
+                "fields": fields
+            }
+        ]
+        #print("write something ", point)
+        write_api.write(INFLUXDB_HOST['bucket'], INFLUXDB_HOST['org'], point)
 
 
 #----MQTT----
@@ -37,8 +57,8 @@ def influxdb_writer():
 MQTT_BROKER = {
     'address': "v8517e16.ala.us-east-1.emqxsl.com",
     'port': 8883,  # TLS/SSL port
-    'username': "ife",  # Replace with your MQTT username
-    'password': "ife",  # Replace with your MQTT password
+    'username': "ife",  
+    'password': "ife", 
 }
 
 MQTT_METADATA = {
@@ -54,9 +74,9 @@ def mqtt_listener():
         client.subscribe(MQTT_METADATA['motiontopic'])
 
     def on_message(client, userdata, message):
-        data = message.payload.decode()
-        print("I got a data ", data)
-        #data_queue.put(data)
+        data = json.loads(message.payload.decode())
+        #print("I got a data from the user ", data)
+        data_queue.put(data)
 
     # Create a client instance
     client = mqtt.Client()
@@ -73,11 +93,27 @@ def mqtt_listener():
     # Connect
     client.connect(MQTT_BROKER['address'], MQTT_BROKER['port'], 60)  # 60 is waiting interval
 
-    client.loop_forever()
+    client.loop_start() 
+
+    def on_key_event(e):
+        global working
+        if e.name == 'esc':
+            print("You pressed the 'esc' key. Exiting...")
+            keyboard.unhook_all()
+            # Unhook all events to stop listening
+            client.loop_stop()  # Stop the MQTT client loop
+            client.disconnect()
+            working = False
+
+    keyboard.hook(on_key_event)
+    keyboard.wait()
+    
 
 if __name__ == '__main__':
     working = True
     mqtt_thread = threading.Thread(target=mqtt_listener)
-    #influxdb_thread = threading.Thread(target=influxdb_writer)
+    influxdb_thread = threading.Thread(target=influxdb_writer)
     mqtt_thread.start()
-    #influxdb_thread.start()
+    influxdb_thread.start()
+    #mqtt_thread.join()
+    
